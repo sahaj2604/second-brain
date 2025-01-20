@@ -37,9 +37,9 @@ const userSchema = new mongoose.Schema({
 });
 const linkSchema = new mongoose.Schema({
     hash: { type: String, required: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true },
 });
-const contentTypes = ["image", "video", "article", "audio"];
+const contentTypes = ["twitter", "youtube"];
 const contentSchema = new mongoose.Schema({
     link: {
         type: String,

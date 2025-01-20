@@ -1,11 +1,13 @@
 import express, { Request, Response } from "express"
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
-import { z } from "zod";
+import { promise, z } from "zod";
 import bcrypt from 'bcrypt'
-import { Content, dbConnect, User } from "./db.js";
+import { Content, dbConnect, Link, User } from "./db.js";
 import { auth } from "./middleware.js";
 import cookieParser from 'cookie-parser'
+import { random } from "./utils.js";
+import cors from     'cors'
 
 dotenv.config();
 const app=express();
@@ -14,6 +16,10 @@ const PORT=process.env.PORT
 //middleware
 app.use(express.json());
 app.use(cookieParser())
+app.use(cors({
+    origin: 'http://localhost:5173',  // Allow your frontend origin
+    credentials: true  // Allow cookies to be included
+}))
 
 app.post("/api/v1/signup",async (req: Request, res: Response): Promise<any>=>{
     try {
@@ -29,9 +35,9 @@ app.post("/api/v1/signup",async (req: Request, res: Response): Promise<any>=>{
         const user= await User.create({
             username:data.username,password:hashedPassword
         })
-        return res.json({message:"User signed up"})
+        return res.json({message:"User signed up",success:true})
     } catch (error) {
-        return res.status(411).json({message:"already exist"})
+        return res.status(411).json({message:"already exist",success:false})
     }
 })
 
@@ -42,30 +48,35 @@ app.post("/api/v1/signin",async (req: Request, res: Response): Promise<any>=>{
     }
     const user=await User.findOne({username})
     if(!user){
-        return res.json({message:"invalid credentials"});
+        return res.json({message:"invalid credentials",success:false});
     }
     const passCompare=await bcrypt.compare(password,user.password);
     if(!passCompare){
-        return res.json({message:"invalid credentials"});
+        return res.json({message:"invalid credentials",success:false});
     }
     const tokenData={userId:user._id}
     const secret = process.env.JWT_SECRET || 'default_secret';
 
     const token=jwt.sign(tokenData,secret)
     res.cookie("token",token);
-    return res.json({token})
+    return res.json({token,success:true})
 })
 
 app.post("/api/v1/content",auth,async (req: Request, res: Response): Promise<any>=>{
-    const {link,type,title}=req.body;
-    const content=await Content.create({
-        link,
-        title,type,
-        //@ts-ignore
-        userId:req.id
-    })
-
-    return res.json({message:'content added',content});
+    try {
+        const {link,type,title}=req.body;
+        const content=await Content.create({
+            link,
+            title,type,
+            //@ts-ignore
+            userId:req.id
+        })
+    
+        return res.json({message:'content added',content});
+        
+    } catch (error) {
+        return res.send(error)
+    }
 })
 app.get("/api/v1/content",auth,async (req: Request, res: Response): Promise<any>=>{
     //@ts-ignore
@@ -86,16 +97,32 @@ app.delete("/api/v1/content",auth,async (req: Request, res: Response): Promise<a
     return res.status(200).json({message:"deleted"});
 })
 
-app.post("/api/v1/brain/share",async (req,res)=>{
-
+app.post("/api/v1/brain/share",auth,async (req:Request,res:Response): Promise<any>=>{
+    const {share}=req.body;
+    if(!share){
+        //@ts-ignore
+        await Link.deleteOne({userId:req.id})
+        return res.json({message:"deleted link"})
+    }
+    //@ts-ignore
+    const existingLink=await Link.findOne({userId:req.id})
+    if(existingLink){
+        return res.json({hash:existingLink.hash})
+    }
+    const link=await Link.create({
+        hash:random(10),
+        //@ts-ignore
+        userId: req.id
+    
+    })
+    return res.json({message:"Updated sharable link",link})
 })
 app.get("/api/v1/brain/:shareLink",async (req: Request, res: Response): Promise<any>=>{
     const {shareLink}=req.params;
-    const contents=await Content.find({link:shareLink});
-    if(!contents){
-        return res.status(404).json({message:"share link is invalid or sharing is disabled"})
-    }
-    return res.status(200).json({contents})
+    const link=await Link.findOne({hash:shareLink}).populate("userId","username")
+    const user=await User.findById(link?.userId)
+    const content=await Content.find({userId:user?._id})
+    return res.json({username:user?.username,content})
 })
 
 
